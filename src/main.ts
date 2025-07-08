@@ -3,20 +3,17 @@ import { Plugin, TFile, TFolder } from "obsidian";
 
 export default class MdxHeadingIndexer extends Plugin {
   async onload() {
-    console.log("MdxHeadingIndexer loaded");
+    
 
     this.app.workspace.onLayoutReady(() => {
       try {
-        const markdownExtensions =
-          (this.app.vault as unknown as { getMarkdownExtensions?: () => string[] }).getMarkdownExtensions?.() || [];
+        // @ts-ignore
+        const markdownExtensions = this.app.vault.getMarkdownExtensions();
         if (!markdownExtensions.includes("mdx")) {
           this.registerExtensions(["mdx"], "markdown");
         }
-      } catch (error) {
-        console.warn(
-          "Skipping extension registration check; assuming 'mdx' is already registered.",
-          error
-        );
+      } catch (_) {
+        console.warn("Skipping extension registration check; assuming 'mdx' is already registered.");
       }
     });
 
@@ -32,17 +29,20 @@ export default class MdxHeadingIndexer extends Plugin {
 
     this.registerDomEvent(document, "click", async (evt: MouseEvent) => {
       const target = evt.target as HTMLElement;
+      
 
       const linkEl = target.closest("a[href*='#']") as HTMLElement;
+      
 
       if (!linkEl) return;
 
-      const rawHref =
-        linkEl.getAttribute("data-href") ?? linkEl.getAttribute("href");
+      const rawHref = linkEl.getAttribute("data-href") ?? linkEl.getAttribute("href");
+      
+      
+      
 
-      const match =
-        rawHref?.match(/^([^#]+?)(?:\.mdx)?#(.+)$/) ||
-        rawHref?.match(/^#(.+)$/);
+      const match = rawHref?.match(/^([^#]+?)(?:\.mdx)?#(.+)$/) || rawHref?.match(/^#(.+)$/);
+      
 
       evt.preventDefault();
       let heading: string | undefined;
@@ -50,55 +50,41 @@ export default class MdxHeadingIndexer extends Plugin {
 
       if (match) {
         heading = decodeURIComponent(match[2] ?? match[1]);
-        fileName = match[2]
-          ? match[1]
-          : this.app.workspace.getActiveFile()?.name.replace(/\.mdx$/, "");
+        fileName = match[2] ? match[1] : this.app.workspace.getActiveFile()?.name.replace(/\.mdx$/, "");
       } else {
         heading = linkEl.textContent?.trim();
-        fileName = this.app.workspace
-          .getActiveFile()
-          ?.name.replace(/\.mdx$/, "");
+        fileName = this.app.workspace.getActiveFile()?.name.replace(/\.mdx$/, "");
       }
 
       if (!fileName || !heading) return;
 
       const targetPath = `${fileName}.mdx`;
-      const targetFile = this.app.vault
-        .getFiles()
-        .find((f) => f.path.endsWith(targetPath));
-      if (!targetFile) {
-        console.warn("[mdx] Target file not found in vault:", targetPath);
-        return;
-      }
+const targetFile = this.app.vault.getFiles().find(f => f.path.endsWith(targetPath));
+if (!targetFile) {
+  
+  return;
+}
 
-      const leaf = this.app.workspace.getLeaf(false);
-      await leaf.openFile(targetFile);
-      const editor = this.app.workspace.activeEditor?.editor;
-      if (editor) {
-        const lines = editor.getValue().split("\n");
-        const targetLine = lines.findIndex(
-          (line) => line.trim().startsWith("#") && line.includes(heading)
-        );
-        if (targetLine !== -1) {
-          editor.setCursor({ line: targetLine, ch: 0 });
-          editor.scrollIntoView(
-            {
-              from: { line: targetLine, ch: 0 },
-              to: { line: targetLine + 1, ch: 0 },
-            },
-            true
-          );
-        } else {
-          console.warn("[mdx] Heading not found:", heading);
-        }
-      }
+
+const leaf = this.app.workspace.getLeaf(false);
+await leaf.openFile(targetFile);
+const editor = this.app.workspace.activeEditor?.editor;
+if (editor) {
+  const lines = editor.getValue().split("\n");
+  const targetLine = lines.findIndex(line => line.trim().startsWith("#") && line.includes(heading));
+  if (targetLine !== -1) {
+    editor.setCursor({ line: targetLine, ch: 0 });
+    editor.scrollIntoView({ from: { line: targetLine, ch: 0 }, to: { line: targetLine + 1, ch: 0 } }, true);
+    
+  } else {
+    
+  }
+}
     });
   }
 
   async indexAllMdxFiles() {
-    const mdxFiles = this.app.vault
-      .getFiles()
-      .filter((f) => f.extension === "mdx");
+    const mdxFiles = this.app.vault.getFiles().filter((f) => f.extension === "mdx");
     for (const file of mdxFiles) {
       await this.indexMdxFile(file);
     }
@@ -113,18 +99,14 @@ export default class MdxHeadingIndexer extends Plugin {
       const content = await this.app.vault.read(file);
       const headings = this.extractHeadings(content);
 
-      const outContent = headings
-        .map((h) => `${"#".repeat(h.level)} ${h.text}`)
-        .join("\n");
+      const outContent = headings.map((h) => `${"#".repeat(h.level)} ${h.text}`).join("\n");
 
       try {
         const folder = this.app.vault.getAbstractFileByPath(cacheDir);
         if (!folder) {
           await this.app.vault.createFolder(cacheDir);
         } else if (!(folder instanceof TFolder)) {
-          console.warn(
-            `[mdx-heading-indexer] Skipped cache dir creation: '${cacheDir}' exists as file.`
-          );
+          
           return;
         }
       } catch (e) {
@@ -139,11 +121,10 @@ export default class MdxHeadingIndexer extends Plugin {
           await this.app.vault.create(cacheFilePath, outContent);
         } catch (e) {
           if (!String(e).includes("File already exists")) throw e;
-          console.warn(
-            `[mdx-heading-indexer] Skipped creation: '${cacheFilePath}' already exists.`
-          );
+          
         }
       }
+
     } catch (e) {
       console.error("[mdx-heading-indexer] Failed to index:", file.path, e);
     }
