@@ -1,0 +1,10 @@
+{
+    "id": "obsidian-mdx-heading-indexer",
+    "version": "0.0.1",
+    "description": "Enables [[#heading]] link suggestions and jump-to-heading support for .mdx files in Obsidian",
+    "name": "Obsidian MDX Heading Indexer",
+    "author": "mizuirorivi",
+    "authorUrl": "https://github.com/mizuirorivi/obsidian-mdx-heading-indexer",
+    "isDesktopOnly": false,
+    "minAppVersion": "0.10.12"
+  }
