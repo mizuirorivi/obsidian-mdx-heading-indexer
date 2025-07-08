@@ -1,17 +1,27 @@
 // src/main.ts
-import { Plugin, TFile } from "obsidian";
+import { Plugin, TFile, TFolder } from "obsidian";
 
 export default class MdxHeadingIndexer extends Plugin {
   async onload() {
     console.log("MdxHeadingIndexer loaded");
 
-    // 拡張子としてmdxをmarkdown扱いに
-    this.registerExtensions(["mdx"], "markdown");
+    this.app.workspace.onLayoutReady(() => {
+      try {
+        const markdownExtensions =
+          (this.app.vault as unknown as { getMarkdownExtensions?: () => string[] }).getMarkdownExtensions?.() || [];
+        if (!markdownExtensions.includes("mdx")) {
+          this.registerExtensions(["mdx"], "markdown");
+        }
+      } catch (error) {
+        console.warn(
+          "Skipping extension registration check; assuming 'mdx' is already registered.",
+          error
+        );
+      }
+    });
 
-    // 起動時の初期インデックス
     await this.indexAllMdxFiles();
 
-    // ファイル変更監視
     this.registerEvent(
       this.app.vault.on("modify", async (file) => {
         if (file instanceof TFile && file.extension === "mdx") {
@@ -20,36 +30,75 @@ export default class MdxHeadingIndexer extends Plugin {
       })
     );
 
-    // カスタムクリックハンドラ
-    this.registerDomEvent(document, "click", async (evt) => {
+    this.registerDomEvent(document, "click", async (evt: MouseEvent) => {
       const target = evt.target as HTMLElement;
-      if (target.tagName === "A" && target.classList.contains("internal-link")) {
-        const href = target.getAttribute("href");
-        if (!href) return;
 
-        // mdxファイルへの見出しリンクを検出
-        const match = href.match(/^([^#]+)\.mdx#(.+)$/);
-        if (match) {
-          evt.preventDefault();
-          const [_, fileName, heading] = match;
-          const file = this.app.metadataCache.getFirstLinkpathDest(fileName + ".mdx", "");
-          if (!file) return;
+      const linkEl = target.closest("a[href*='#']") as HTMLElement;
 
-          const content = await this.app.vault.read(file);
-          const lines = content.split("\n");
-          const headingLineIndex = lines.findIndex((line) => line.trim().replace(/^#+\s*/, "") === decodeURIComponent(heading));
+      if (!linkEl) return;
 
-          await this.app.workspace.getLeaf().openFile(file);
-          if (headingLineIndex !== -1) {
-            this.app.workspace.activeEditor?.editor?.setCursor({ line: headingLineIndex, ch: 0 });
-          }
+      const rawHref =
+        linkEl.getAttribute("data-href") ?? linkEl.getAttribute("href");
+
+      const match =
+        rawHref?.match(/^([^#]+?)(?:\.mdx)?#(.+)$/) ||
+        rawHref?.match(/^#(.+)$/);
+
+      evt.preventDefault();
+      let heading: string | undefined;
+      let fileName: string | undefined;
+
+      if (match) {
+        heading = decodeURIComponent(match[2] ?? match[1]);
+        fileName = match[2]
+          ? match[1]
+          : this.app.workspace.getActiveFile()?.name.replace(/\.mdx$/, "");
+      } else {
+        heading = linkEl.textContent?.trim();
+        fileName = this.app.workspace
+          .getActiveFile()
+          ?.name.replace(/\.mdx$/, "");
+      }
+
+      if (!fileName || !heading) return;
+
+      const targetPath = `${fileName}.mdx`;
+      const targetFile = this.app.vault
+        .getFiles()
+        .find((f) => f.path.endsWith(targetPath));
+      if (!targetFile) {
+        console.warn("[mdx] Target file not found in vault:", targetPath);
+        return;
+      }
+
+      const leaf = this.app.workspace.getLeaf(false);
+      await leaf.openFile(targetFile);
+      const editor = this.app.workspace.activeEditor?.editor;
+      if (editor) {
+        const lines = editor.getValue().split("\n");
+        const targetLine = lines.findIndex(
+          (line) => line.trim().startsWith("#") && line.includes(heading)
+        );
+        if (targetLine !== -1) {
+          editor.setCursor({ line: targetLine, ch: 0 });
+          editor.scrollIntoView(
+            {
+              from: { line: targetLine, ch: 0 },
+              to: { line: targetLine + 1, ch: 0 },
+            },
+            true
+          );
+        } else {
+          console.warn("[mdx] Heading not found:", heading);
         }
       }
     });
   }
 
   async indexAllMdxFiles() {
-    const mdxFiles = this.app.vault.getFiles().filter((f) => f.extension === "mdx");
+    const mdxFiles = this.app.vault
+      .getFiles()
+      .filter((f) => f.extension === "mdx");
     for (const file of mdxFiles) {
       await this.indexMdxFile(file);
     }
@@ -57,26 +106,44 @@ export default class MdxHeadingIndexer extends Plugin {
 
   async indexMdxFile(file: TFile) {
     const cacheDir = ".obsidian/mdx-cache";
-    const cacheFilePath = `${cacheDir}/${file.basename}.md`;
+    const safePath = file.path.split("/").join("__");
+    const cacheFilePath = `${cacheDir}/${safePath}.md`;
 
     try {
       const content = await this.app.vault.read(file);
       const headings = this.extractHeadings(content);
 
-      const outContent = headings.map((h) => `${"#".repeat(h.level)} ${h.text}`).join("\n");
+      const outContent = headings
+        .map((h) => `${"#".repeat(h.level)} ${h.text}`)
+        .join("\n");
 
-      const folder = this.app.vault.getAbstractFileByPath(cacheDir);
-      if (!folder) {
-        await this.app.vault.createFolder(cacheDir);
+      try {
+        const folder = this.app.vault.getAbstractFileByPath(cacheDir);
+        if (!folder) {
+          await this.app.vault.createFolder(cacheDir);
+        } else if (!(folder instanceof TFolder)) {
+          console.warn(
+            `[mdx-heading-indexer] Skipped cache dir creation: '${cacheDir}' exists as file.`
+          );
+          return;
+        }
+      } catch (e) {
+        if (!String(e).includes("Folder already exists")) throw e;
       }
 
       const existing = this.app.vault.getAbstractFileByPath(cacheFilePath);
       if (existing instanceof TFile) {
         await this.app.vault.modify(existing, outContent);
       } else {
-        await this.app.vault.create(cacheFilePath, outContent);
+        try {
+          await this.app.vault.create(cacheFilePath, outContent);
+        } catch (e) {
+          if (!String(e).includes("File already exists")) throw e;
+          console.warn(
+            `[mdx-heading-indexer] Skipped creation: '${cacheFilePath}' already exists.`
+          );
+        }
       }
-
     } catch (e) {
       console.error("[mdx-heading-indexer] Failed to index:", file.path, e);
     }

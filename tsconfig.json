@@ -9,6 +9,7 @@
       "noImplicitAny": true,
       "moduleResolution": "node",
       "importHelpers": true,
+      "jsx": "react",
       "lib": [
         "dom",
         "es5",
@@ -18,5 +19,8 @@
     },
     "include": [
       "**/*.ts"
+    ],
+    "exclude": [
+      "node_modules/@types/mdx"
     ]
   }
